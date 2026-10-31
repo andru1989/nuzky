@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { AudioLines, Check, Film, Layers2, Link2, PictureInPicture2, Plus, Trash2 } from "lucide-react";
+import { type MediaTabId, useElements } from "../../lib/elements";
 import { usedAssets, useEditor } from "../../lib/store";
 import { formatDuration } from "../../lib/time";
 import { openYoutube } from "../../lib/youtube";
 import type { Asset } from "../../lib/types";
-import { FadeImg, Menu, ProgressBar, lockedProps, useLockReason } from "../ui";
+import { FadeImg, Menu, ProgressBar, TabBar, TabPanel, lockedProps, useLockReason } from "../ui";
+import { SavedTab } from "./SavedTab";
 import { ImportPlaceholder, ImportTile, KindIcon, addAtPlayhead, addOverlay, addPictureInPicture, assetDragHandler, pickAndImport, removeAsset } from "./assets";
 
 /** Round action on a media tile; no blur, so a grid of them stays cheap to paint. */
@@ -156,11 +158,12 @@ function YoutubeTile({ compact = false, className = "" }: { compact?: boolean; c
   );
 }
 
-export function MediaTab() {
+/** The project's own media. */
+function ProjectMedia() {
   const assets = useEditor((s) => s.snap?.project.assets ?? []);
   const importing = useEditor((s) => s.importing);
   return (
-    <div className="@container flex min-h-0 flex-1 flex-col gap-3.5 pt-3.5">
+    <div className="@container flex min-h-0 flex-1 flex-col gap-3.5 pt-2.5">
       {assets.length === 0 && importing.length === 0 ? (
         // Empty: one invitation in the middle, rather than an import tile above a second frame saying the same.
         <div className="mx-3.5 mb-3.5 flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
@@ -186,6 +189,25 @@ export function MediaTab() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+const TABS: { id: MediaTabId; label: string }[] = [
+  { id: "project", label: "Project" },
+  { id: "saved", label: "Saved" },
+];
+
+/** The project's media, and the saved elements every project can use (Save as element… opens them). */
+export function MediaTab() {
+  const tab = useElements((s) => s.tab);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col pt-3">
+      <TabBar group="media" label="Media" tabs={TABS} value={tab} onChange={(id) => useElements.setState({ tab: id })} />
+      <TabPanel group="media" id={tab} className="flex min-h-0 flex-1 flex-col">
+        {tab === "project" && <ProjectMedia />}
+        {tab === "saved" && <SavedTab />}
+      </TabPanel>
     </div>
   );
 }

@@ -293,7 +293,22 @@ function MyStyles({ look, mine, tile }: { look: CaptionLook; mine: ReturnType<ty
   );
 }
 
-function NameField({ initial, error, onSave, onCancel }: { initial: string; error?: string; onSave: (name: string) => void; onCancel: () => void }) {
+/** A name typed in place, for a saved style or element: `Enter` saves, `Esc` cancels. */
+export function NameField({
+  initial,
+  error,
+  onSave,
+  onCancel,
+  label = "Style name",
+  maxLength = 40,
+}: {
+  initial: string;
+  error?: string;
+  onSave: (name: string) => void;
+  onCancel: () => void;
+  label?: string;
+  maxLength?: number;
+}) {
   const [name, setName] = useState(initial);
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => ref.current?.select(), []);
@@ -306,10 +321,10 @@ function NameField({ initial, error, onSave, onCancel }: { initial: string; erro
       <div className="flex items-center gap-1.5">
         <input
           ref={ref}
-          aria-label="Style name"
+          aria-label={label}
           aria-invalid={!!error || undefined}
           value={name}
-          maxLength={40}
+          maxLength={maxLength}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
             e.stopPropagation();

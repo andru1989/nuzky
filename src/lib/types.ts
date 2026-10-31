@@ -565,6 +565,15 @@ export type DeletedCollection = {
 };
 
 /**
+ * What Delete took out, for Undo to put back where it was.
+ */
+export type DeletedElement = {
+  element: SavedElement,
+  index: number,
+  elements: Array<ElementView>,
+};
+
+/**
  * A platform's delivery format, shared by the export dialog, MCP and the CLI. Every preset writes
  * H.264 High and AAC 48 kHz stereo with the sound levelled to its loudness.
  */
@@ -823,6 +832,21 @@ export type Effect = {
  * A number, a toggle, or a colour written #RRGGBB.
  */
 export type EffectValue = boolean | number | string;
+
+export type ElementView = {
+  /**
+   * PNG data URL of the element as the renderer draws it in the project it was saved from; null without one.
+   */
+  preview: string | null,
+  id: string,
+  name: string,
+  /**
+   * When it was saved, in milliseconds since the Unix epoch.
+   */
+  savedMs: number,
+  clips: Array<CopiedClip>,
+  assets: Array<Asset>,
+};
 
 export type ExportRequest = {
   /**
@@ -1386,6 +1410,20 @@ export type SampleRun = {
    * Captions on the timeline once it is done.
    */
   captions: number,
+};
+
+/**
+ * One saved element: clips as copied, with the media they show.
+ */
+export type SavedElement = {
+  id: string,
+  name: string,
+  /**
+   * When it was saved, in milliseconds since the Unix epoch.
+   */
+  savedMs: number,
+  clips: Array<CopiedClip>,
+  assets: Array<Asset>,
 };
 
 /**

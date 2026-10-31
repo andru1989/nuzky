@@ -1,7 +1,7 @@
 import { invoke, type Channel } from "@tauri-apps/api/core";
 import type { GalleryPlugin, GalleryState } from "./gallery";
 import type { EffectIssue, ListedPlugin, PluginRow, PluginValues } from "./plugins";
-import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
+import type { AgentAccess, AgentConnection, AgentKind, AgentSetup, AgentStatus, Animation, BeatCutDone, BeatPlans, Boot, CapCutDraft, CaptionPreset, ChatGptStatus, Collection, CoverView, DeletedCollection, DeletedElement, ElementView, SavedElement, SpeechModel, SpeechSetup, EditCmd, ExportRequest, Filmstrip, FontFamilies, HistoryPeek, LayerBounds, Library, Part, PreviewStarted, Project, ProjectPoster, ProjectSummary, ProjectVersion, RecapInfo, ReelCandidate, ReelFinish, ReelFraming, Rhythm, Said, SampleRun, Snapshot, Sound, SoundKind, SoundPage, SoundSettings, StickerCatalog, StyleAction, StylePair, StyleView, TextStyle, Thumbnail, ThumbnailFormat, TimelinePlan, TranscriptCut, TranscriptView, VideoPreview, VisionModels, WordsCorrected, YoutubeVideo, ZoomSuggestions, ZoomsApplied } from "./types";
 
 /**
  * The session a change was made for. Mutating commands carry it, so a change still in flight when
@@ -192,6 +192,12 @@ export const api = {
   saveCaptionStyle: (style: CaptionPreset) => invoke<CaptionPreset[]>("save_caption_style", { style }),
   renameCaptionStyle: (from: string, to: string) => invoke<CaptionPreset[]>("rename_caption_style", { from, to }),
   deleteCaptionStyle: (name: string) => invoke<CaptionPreset[]>("delete_caption_style", { name }),
+  /** The user's saved elements, kept beside the projects; each change returns the list, the newest first. */
+  savedElements: () => invoke<ElementView[]>("saved_elements"),
+  saveElement: (name: string, clipIds: string[]) => invoke<ElementView[]>("save_element", { name, clipIds }),
+  renameElement: (id: string, name: string) => invoke<ElementView[]>("rename_element", { id, name }),
+  deleteElement: (id: string) => invoke<DeletedElement>("delete_element", { id }),
+  restoreElement: (element: SavedElement, index: number) => invoke<ElementView[]>("restore_element", { element, index }),
   /** Recognises the heard media without a transcript, or all of it with `refresh`. */
   startTranscript: (model: string, language: string, refresh: boolean, epoch: Epoch) => invoke<string>("start_transcript", { model, language, refresh, expectedEpoch: epoch }),
   transcriptView: (pauseUs: number) => invoke<TranscriptView>("transcript_view", { pauseUs: Math.round(pauseUs) }),

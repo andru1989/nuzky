@@ -3,6 +3,7 @@ mod activity;
 pub mod beats;
 pub mod bridge;
 pub mod caption_styles;
+pub mod elements;
 mod fonts;
 pub mod import;
 pub mod ipc;

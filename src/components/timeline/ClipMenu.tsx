@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { ClipboardCopy, ClipboardPaste, Copy, ListChecks, Paintbrush, Replace, Scissors, ScissorsLineDashed, Snowflake, Trash2, Unlink } from "lucide-react";
+import { BookmarkPlus, ClipboardCopy, ClipboardPaste, Copy, ListChecks, Paintbrush, Replace, Scissors, ScissorsLineDashed, Snowflake, Trash2, Unlink } from "lucide-react";
+import { startSavingSelection } from "../../lib/elements";
 import { chose } from "../../lib/exit";
 import { pickAndReplace } from "../panel/assets";
 import { AI_EDITING, NOTHING_COPIED, attributeTargets, canSplitClip, copySelection, cutSelection, deleteSelection, detachAudio, detachBlocker, duplicateSelection, findClip, freezeAtPlayhead, freezeBlocker, isFreeze, pasteAttributes, pasteAttributesBlocker, pasteClips, selectTrack, splitAtPlayhead, useAiLocked, useEditor } from "../../lib/store";
@@ -195,6 +196,11 @@ export function ClipMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
         disabled={locked || looks === 0}
         reason={locked ? AI_EDITING : pasteAttributesBlocker(project, selection, clipboard)}
         onSelect={run(pasteAttributes)}
+      />
+      <Item
+        icon={<BookmarkPlus size={14} />}
+        label={n === 1 ? "Save as element…" : `Save ${n} clips as element…`}
+        onSelect={run(startSavingSelection)}
       />
       <div className="mx-2 my-1 h-px bg-white/[.08]" />
       <Item icon={<Trash2 size={14} />} label={many("Delete", "Delete")} shortcut="Del" disabled={locked} reason={AI_EDITING} onSelect={run(deleteSelection)} />

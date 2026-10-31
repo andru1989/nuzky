@@ -11,6 +11,7 @@ mod commands;
 mod connect;
 mod cover;
 mod diagnostics;
+mod elements;
 mod engine;
 #[cfg(target_os = "macos")]
 mod file_dialogs;
@@ -1330,6 +1331,11 @@ pub fn run() {
             remote::remote_stop,
             caption_styles::caption_styles,
             caption_styles::save_caption_style,
+            elements::saved_elements,
+            elements::save_element,
+            elements::rename_element,
+            elements::delete_element,
+            elements::restore_element,
             caption_styles::rename_caption_style,
             caption_styles::delete_caption_style,
             boot,
