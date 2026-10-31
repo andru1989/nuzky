@@ -1,9 +1,11 @@
 """Copy, cut and paste of clips and Paste attributes. A hook text and a sticker copied with Ctrl+C go 10 s later with
 Ctrl+V, each on the track it came from, as one undo step, and the export draws them there as at their first place; the
 context menu gives a plain text the hook's look and keeps its words, as one undo step; the AI lock refuses cutting and
-pasting with its notice; Ctrl+C in a text field or in the transcript copies no clip; Ctrl+X cuts; and another project
-starts with nothing to paste."""
+pasting with its notice; Ctrl+C in a text field or in the transcript copies no clip; Ctrl+X cuts; and the copied hook
+and sticker paste into another project, bringing the sticker's file in the same undo step and drawn there as in the first
+project."""
 import json, subprocess, time
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -46,11 +48,13 @@ def toast(r, text):
 
 
 def frame(r, name, at_us):
-    """The renderer's frame from the saved file, once the file holds what the editor shows."""
+    """The renderer's frame from the open project's saved file, once the file holds what the editor shows."""
+    # Not r.saved_project(), which takes any project file once a second project exists.
+    saved = Path(r.s.run('return window.__nuzky.store.getState().snap.path'))
     key = lambda p: [(c['id'], c['startUs'], c['content'].get('style')) for t in p['tracks'] for c in t['clips']]
-    wait(lambda: key(json.loads(r.saved_project().read_text())) == key(project(r)), 10)
+    wait(lambda: key(json.loads(saved.read_text())) == key(project(r)), 10)
     path = r.work / f'{name}.png'
-    subprocess.run([str(CLI), 'frame', str(r.saved_project()), f'{at_us / 1e6:.6f}', str(path), '720'], env=r.env, check=True,
+    subprocess.run([str(CLI), 'frame', str(saved), f'{at_us / 1e6:.6f}', str(path), '720'], env=r.env, check=True,
                    capture_output=True)
     return path
 
@@ -77,7 +81,7 @@ def same(a, b):
 @flow('clipboard', 'Ctrl+C and Ctrl+V put a hook text and a sticker 10 s later on their own tracks as one undo step, '
       'drawn there in the export as at their first place; Paste attributes from the context menu gives a plain text the '
       "hook's look as one undo step; the AI lock refuses cutting and pasting; Ctrl+C in a text field or the transcript "
-      'copies no clip; Ctrl+X cuts; another project starts with nothing to paste')
+      'copies no clip; Ctrl+X cuts; the copies paste into another project with their media as one undo step')
 def clipboard_flow(r):
     # A still background, so a frame 10 s later differs only by what lies over it.
     still = r.work / 'still.mp4'
@@ -239,21 +243,57 @@ def clipboard_flow(r):
     r.check('Ctrl+V in the transcript pastes nothing', in_transcript and len(clips(r)) == count, (in_transcript, len(clips(r)), count))
     r.check('no error toast', not r.errors(), r.errors())
 
-    # Another project starts with nothing to paste: the copied media belongs to this one.
+    # The clipboard keeps its clips in another project: pasted there, they bring the media they use, as one undo step.
+    select(r, [hook['id'], sticker['id']])
+    r.key('c', ctrlKey=True)
+    wait(lambda: toast(r, '2 clips copied') == '', 5)
+    arrow = next(a for a in project(r)['assets'] if a['id'] == sticker['content']['assetId'])
     epoch = r.state()['epoch']
     r.s.call('window.__nuzky.newProjectFromMedia(arguments[0])', [str(still)])
     r.check('a new project opens in the editor', wait(lambda: r.state()['epoch'] != epoch
                                                       and r.s.run('return window.__nuzky.store.getState().view') == 'editor', 15))
     r.s.run('document.activeElement?.blur()')
-    count = len(clips(r))
+    before = project(r)
+    r.check("the new project does not have the arrow's file", all(a['path'] != arrow['path'] for a in before['assets']), before['assets'])
+    known = {c['id'] for _, c in clips(r)}
+    r.seek(3_000_000)
     r.key('v', ctrlKey=True)
-    r.check('Ctrl+V there says there is nothing to paste and adds nothing',
-            wait(lambda: toast(r, NOTHING_COPIED) == '', 3) and len(clips(r)) == count, r.state()['toasts'])
+    pasted = wait(lambda: (new := [c for _, c in clips(r) if c['id'] not in known]) and len(new) == 2 and new, 5) or []
+    text = next((c for c in pasted if c['content']['type'] == 'text'), None)
+    media = next((c for c in pasted if c['content']['type'] == 'media'), None)
+    r.check('Ctrl+V there pastes the hook and the arrow at the playhead, keeping their offset and their look',
+            text and media and (text['startUs'], media['startUs']) == (3_000_000, 4_000_000)
+            and text['content']['style'] == hook['content']['style'] and media['content']['transform'] == sticker['content']['transform'],
+            pasted)
+    added = [a for a in project(r)['assets'] if a['path'] == arrow['path']]
+    r.check("the arrow's file came along under the id its clip names, the file where it was",
+            len(added) == 1 and media and media['content']['assetId'] == added[0]['id'] and Path(arrow['path']).is_file(), (added, media))
+    r.shot('pasted-other-project')
+    later = frame(r, 'other-project-4.5s', 4_500_000)
+    r.check('the renderer draws the hook and the arrow there as in the first project',
+            all(x < 0.002 for x in bands(first, later)) and all(x > 0.01 for x in bands(empty, later)),
+            {'from the first project': bands(first, later), 'from the empty frame': bands(empty, later)})
+    r.key('z', ctrlKey=True)
+    r.check("one Ctrl+Z takes the clips and the arrow's file out again",
+            wait(lambda: (p := project(r))['tracks'] == before['tracks'] and p['assets'] == before['assets'], 5),
+            [a['path'] for a in project(r)['assets']])
+    r.key('z', ctrlKey=True, shiftKey=True)
+    wait(lambda: len(clips(r)) == len(known) + 2, 5)
+    assets = project(r)['assets']
+    known = {c['id'] for _, c in clips(r)}
+    r.seek(8_000_000)
+    r.key('v', ctrlKey=True)
+    again = wait(lambda: (new := [c for _, c in clips(r) if c['id'] not in known]) and len(new) == 2 and new, 5) or []
+    r.check('pasting again uses the file the project now has, adding no media',
+            project(r)['assets'] == assets and any(c['content'].get('assetId') == added[0]['id'] for c in again) if added else False,
+            [a['path'] for a in project(r)['assets']])
+    r.check('no error toast in the other project', not r.errors(), r.errors())
 
-    # The menu in the smallest window, with nothing to paste.
+    # The menu in the smallest window, offering the copies.
     resize(r, 1024, 640)
     r.s.run(RIGHT_CLICK, r.track()[0]['id'])
     menu = {i['label']: i for i in wait(lambda: r.s.run(MENU), 3) or []}
-    r.check('there Paste at playhead and Paste attributes say why they are disabled',
-            all(menu.get(l, {}).get('disabled') and menu[l]['reason'] for l in ('Paste at playhead', 'Paste attributes')), menu)
+    paste = next((i for label, i in menu.items() if label.startswith('Paste') and label.endswith('at playhead')), None)
+    r.check('there Paste offers the clips copied in the other project', paste and paste['label'] == 'Paste 2 clips at playhead'
+            and not paste['disabled'], menu)
     r.shot('context-menu-1024')

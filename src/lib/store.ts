@@ -33,8 +33,13 @@ interface EditorState {
   selection: string[];
   /** Clip whose incoming cut (transition) is selected; exclusive with `selection`. */
   cut: string | null;
-  /** Clips copied or cut in the open project, never the system's clipboard: their media belongs to the project. */
+  /**
+   * Clips copied or cut, never the system's clipboard. They stay when another project opens, and pasting there
+   * brings their media along (`bringMedia`).
+   */
   clipboard: CopiedClip[] | null;
+  /** The media the copied clips use, as the project they were copied from had it. */
+  clipboardAssets: Asset[];
   playing: boolean;
   timeUs: number;
   /** Timeline zoom in pixels per second. */
@@ -406,6 +411,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   selection: [],
   cut: null,
   clipboard: null,
+  clipboardAssets: [],
   playing: false,
   timeUs: 0,
   zoom: 60,
@@ -462,9 +468,10 @@ export const useEditor = create<EditorState>((set, get) => ({
       saveState: switched ? "saved" : changed ? "saving" : get().saveState,
       timeUs: Math.min(get().timeUs, projectDuration(snap.project)),
       aiRun: snap.openRunLabel,
-      // A copied project can reuse asset ids for other files, so media previews start over.
-      // An agent's jobs end with their project, whose last events never arrive.
-      ...(switched ? { clipboard: null, thumbs: {}, filmstrips: {}, waveforms: {}, jobs: Object.fromEntries(Object.entries(get().jobs).filter(([, j]) => j.kind !== "agent")) } : {}),
+      // A copied project can reuse asset ids for other files, so media previews start over. The clipboard stays: its
+      // clips carry their media to the next project. An agent's jobs end with their project, whose last events never
+      // arrive.
+      ...(switched ? { thumbs: {}, filmstrips: {}, waveforms: {}, jobs: Object.fromEntries(Object.entries(get().jobs).filter(([, j]) => j.kind !== "agent")) } : {}),
       ...(rebound.length > 0 ? { thumbs: without(get().thumbs), filmstrips: without(get().filmstrips), waveforms: without(get().waveforms) } : {}),
     });
     if (switched) waveformUse.clear();
@@ -878,6 +885,56 @@ function copiesOf(project: Project, ids: string[]): CopiedClip[] {
     .sort((a, b) => a.clip.startUs - b.clip.startUs);
 }
 
+/** The ids of the media a copied clip shows: its own file and an image behind its person. */
+function mediaOf(clip: Clip, background = true): string[] {
+  if (clip.content.type !== "media") return [];
+  const behind = background && clip.content.background?.type === "image" ? [clip.content.background.assetId] : [];
+  return [clip.content.assetId, ...behind];
+}
+
+/** Puts `clips` on the clipboard with the media they use, so they paste into this project or any other. */
+function keepCopies(project: Project, clips: CopiedClip[]) {
+  const used = new Set(clips.flatMap((c) => mediaOf(c.clip)));
+  useEditor.setState({ clipboard: clips, clipboardAssets: project.assets.filter((a) => used.has(a.id)) });
+}
+
+const newAssetId = () => crypto.randomUUID().replaceAll("-", "").slice(0, 12);
+
+/**
+ * The copied media `project` lacks, to add before pasting, and the copies naming their media by its id in `project`.
+ * A file the project already has keeps the project's asset; a copied id that names another file there gets a new
+ * one, since adding an asset under a taken id keeps the project's own. `attributesOnly` brings only what Paste
+ * attributes gives a clip: the image behind its person.
+ */
+export function bringMedia(project: Project, clips: CopiedClip[], assets: Asset[], attributesOnly = false): { add: Asset[]; clips: CopiedClip[] } {
+  const ids = new Map<string, string>();
+  const add: Asset[] = [];
+  const samePart = (a: Asset, b: Asset) => JSON.stringify(a.part ?? null) === JSON.stringify(b.part ?? null);
+  for (const id of new Set(clips.flatMap((c) => (attributesOnly ? mediaOf(c.clip).slice(1) : mediaOf(c.clip))))) {
+    const copied = assets.find((a) => a.id === id);
+    if (!copied || project.assets.some((a) => a.id === id && a.path === copied.path && samePart(a, copied))) continue;
+    const same = project.assets.find((a) => a.path === copied.path && samePart(a, copied));
+    if (same) {
+      ids.set(id, same.id);
+      continue;
+    }
+    const asset = project.assets.some((a) => a.id === id) ? { ...copied, id: newAssetId() } : copied;
+    ids.set(id, asset.id);
+    add.push(asset);
+  }
+  if (ids.size === 0) return { add, clips };
+  const rename = (id: string) => ids.get(id) ?? id;
+  return {
+    add,
+    clips: clips.map((c) => {
+      const content = c.clip.content;
+      if (content.type !== "media") return c;
+      const background = content.background?.type === "image" ? { ...content.background, assetId: rename(content.background.assetId) } : content.background;
+      return { ...c, clip: { ...c.clip, content: { ...content, assetId: rename(content.assetId), background } } };
+    }),
+  };
+}
+
 const clipCount = (n: number) => (n === 1 ? "1 clip" : `${n} clips`);
 
 /** Says how many clips were copied or cut, replacing what an earlier copy said. */
@@ -897,8 +954,8 @@ export function copySelection() {
   void enqueue(async () => {
     const snap = useEditor.getState().snap;
     const clips = snap ? copiesOf(snap.project, ids) : [];
-    if (clips.length === 0) return null;
-    useEditor.setState({ clipboard: clips });
+    if (!snap || clips.length === 0) return null;
+    keepCopies(snap.project, clips);
     sayCopied(clips.length, "copied");
     return null;
   });
@@ -912,7 +969,7 @@ export async function cutSelection() {
   const snap = await edit((project) => {
     clips = copiesOf(project, selection);
     // Filled at its turn in the queue, so a paste pressed right after gets these clips.
-    if (clips.length > 0) useEditor.setState({ clipboard: clips });
+    if (clips.length > 0) keepCopies(project, clips);
     return clips.length > 0 ? { type: "deleteClips", clipIds: clips.map((c) => c.clip.id) } : null;
   });
   if (!snap) return;
@@ -922,13 +979,21 @@ export async function cutSelection() {
 
 export const NOTHING_COPIED = "Nothing to paste. Copy clips with Ctrl+C first.";
 
-/** Pastes the copied clips at the playhead as one undo step; the pasted clips are selected. */
+/**
+ * Pastes the copied clips at the playhead as one undo step; the pasted clips are selected. Copied in another project,
+ * they bring the media they use, added in the same step.
+ */
 export async function pasteClips() {
   const { timeUs, edit, toast } = useEditor.getState();
-  await edit(() => {
-    const clips = useEditor.getState().clipboard;
-    if (!clips) toast({ kind: "info", text: NOTHING_COPIED });
-    return clips && { type: "pasteClips", clips, atUs: Math.round(timeUs) };
+  await edit((project) => {
+    const { clipboard, clipboardAssets } = useEditor.getState();
+    if (!clipboard) {
+      toast({ kind: "info", text: NOTHING_COPIED });
+      return null;
+    }
+    const { add, clips } = bringMedia(project, clipboard, clipboardAssets);
+    const paste: EditCmd = { type: "pasteClips", clips, atUs: Math.round(timeUs) };
+    return add.length > 0 ? [{ type: "addAssets", assets: add }, paste] : paste;
   });
 }
 
@@ -957,12 +1022,15 @@ export async function pasteAttributes() {
   const { selection, edit, toast } = useEditor.getState();
   let pasted = 0;
   const done = await edit((project) => {
-    const { clipboard } = useEditor.getState();
+    const { clipboard, clipboardAssets } = useEditor.getState();
     const blocker = pasteAttributesBlocker(project, selection, clipboard);
     if (blocker) toast({ kind: "info", text: blocker });
-    const groups = blocker ? [] : attributeTargets(project, selection, clipboard);
+    // An image behind the copied clip's person comes along from another project.
+    const brought = blocker || !clipboard ? { add: [], clips: [] } : bringMedia(project, clipboard, clipboardAssets, true);
+    const groups = blocker ? [] : attributeTargets(project, selection, brought.clips);
     pasted = groups.reduce((n, g) => n + g.clipIds.length, 0);
-    return groups.map(({ source, clipIds }): EditCmd => ({ type: "pasteAttributes", source, clipIds }));
+    const cmds = groups.map(({ source, clipIds }): EditCmd => ({ type: "pasteAttributes", source, clipIds }));
+    return brought.add.length > 0 && cmds.length > 0 ? [{ type: "addAssets", assets: brought.add }, ...cmds] : cmds;
   });
   if (!done) return;
   const left = selection.length - pasted;
