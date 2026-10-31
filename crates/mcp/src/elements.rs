@@ -3,6 +3,7 @@
 //! names the files as the project it came from did.
 
 use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, ensure};
@@ -15,6 +16,14 @@ use serde::{Deserialize, Serialize};
 pub const MAX_CLIPS: usize = 50;
 /// Most characters in an element's name.
 pub const MAX_NAME_CHARS: usize = 60;
+
+/// One change of the list at a time: two saves at once, as from a double click, each read the list without the other's
+/// element and the second write lost the first.
+static CHANGING: Mutex<()> = Mutex::new(());
+
+fn changing() -> MutexGuard<'static, ()> {
+    CHANGING.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// One saved element: clips as copied, with the media they show.
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -145,6 +154,7 @@ pub fn from_project(project: &Project, clip_ids: &[String], name: &str) -> Resul
 
 /// Saves `element` first in the list, or back in place when its id is there, as Undo of a delete puts it back.
 pub fn save(mut element: SavedElement) -> Result<Vec<SavedElement>> {
+    let _changing = changing();
     element.name = clean_name(&element.name)?;
     check(&element)?;
     let mut elements = list()?;
@@ -158,6 +168,7 @@ pub fn save(mut element: SavedElement) -> Result<Vec<SavedElement>> {
 
 /// Puts a deleted element back at `index`.
 pub fn restore(element: SavedElement, index: usize) -> Result<Vec<SavedElement>> {
+    let _changing = changing();
     check(&element)?;
     let mut elements = list()?;
     elements.retain(|e| e.id != element.id);
@@ -167,6 +178,7 @@ pub fn restore(element: SavedElement, index: usize) -> Result<Vec<SavedElement>>
 }
 
 pub fn rename(id: &str, name: &str) -> Result<Vec<SavedElement>> {
+    let _changing = changing();
     let mut elements = list()?;
     let element = elements.iter_mut().find(|e| e.id == id).context("UNKNOWN_ELEMENT: no saved element with that id")?;
     element.name = clean_name(name)?;
@@ -177,6 +189,7 @@ pub fn rename(id: &str, name: &str) -> Result<Vec<SavedElement>> {
 /// Deletes element `id`, returning it and where it was, so Undo can put it back. Its picture stays until another
 /// element is saved, for that Undo.
 pub fn delete(id: &str) -> Result<(SavedElement, usize)> {
+    let _changing = changing();
     let mut elements = list()?;
     let index = elements.iter().position(|e| e.id == id).context("UNKNOWN_ELEMENT: no saved element with that id")?;
     let element = elements.remove(index);
@@ -186,6 +199,7 @@ pub fn delete(id: &str) -> Result<(SavedElement, usize)> {
 
 /// Removes the pictures of elements that are gone.
 pub fn sweep_previews() -> Result<()> {
+    let _changing = changing();
     let keep: Vec<String> = list()?.into_iter().map(|e| format!("{}.png", e.id)).collect();
     let Ok(entries) = std::fs::read_dir(dir()?.join("elements")) else { return Ok(()) };
     for entry in entries.flatten() {
@@ -246,5 +260,41 @@ mod tests {
         assert!(from_project(&project, &[], "x").is_err());
         assert!(clean_name(&"x".repeat(MAX_NAME_CHARS + 1)).is_err());
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Saves that arrive together, as from a double click, keep every element: each reads the list the one before
+    /// wrote. Runs in a child process with a data folder of its own.
+    #[test]
+    fn saves_at_once_keep_every_element() {
+        if std::env::var_os("NUZKY_ELEMENTS_TEST").is_none() {
+            let dir = std::env::temp_dir().join(format!("nuzky-elements-{}", new_id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let spawning = crate::model_download::CHILD_SPAWN.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "elements::tests::saves_at_once_keep_every_element", "--nocapture"])
+                .env("NUZKY_ELEMENTS_TEST", "1")
+                .env("NUZKY_DATA_DIR", &dir)
+                .spawn()
+                .unwrap();
+            drop(spawning);
+            let status = child.wait().unwrap();
+            std::fs::remove_dir_all(dir).unwrap();
+            assert!(status.success());
+            return;
+        }
+        let mut project = Project::new("Source");
+        let style = nuzky_engine::edit::caption_preset("reel").unwrap().style.clone();
+        project.apply(EditCmd::AddText { start_us: 0, text: "Hook".into(), style }).unwrap();
+        let ids: Vec<String> = project.tracks.iter().flat_map(|t| t.clips.iter().map(|c| c.id.clone())).collect();
+        let threads: Vec<_> = (0..8)
+            .map(|n| {
+                let element = from_project(&project, &ids, &format!("Hook {n}")).unwrap();
+                std::thread::spawn(move || save(element).unwrap())
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        assert_eq!(list().unwrap().len(), 8);
     }
 }

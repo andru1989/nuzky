@@ -1,8 +1,8 @@
-"""Saved elements. A hook text and a sticker with a fade, saved from the clip context menu, show in the Saved tab with
-the renderer's picture of them and are kept beside the projects; in another project a click puts both at the playhead
-as one undo step, bringing the sticker's file along, and the renderer draws them there as in the first project; the
-menu renames and deletes an element, and the toast's Undo puts it back."""
-import json, subprocess
+"""Saved elements. A hook text and a sticker with a fade, saved from the clip context menu, are kept once beside the
+projects even when Save is clicked twice, and show in the Media tab's Saved part with the renderer's picture of them; in
+another project a click puts both at the playhead as one undo step, bringing the sticker's file along, and the renderer
+draws them there as in the first project; the menu renames and deletes an element, and the toast's Undo puts it back."""
+import json, subprocess, time
 from pathlib import Path
 
 from e2e.clipboard import CLICK, MENU, PICK, RIGHT_CLICK, bands, clip, clips, frame, project, select
@@ -21,6 +21,9 @@ SAVED_SHOWN = """return window.__nuzky.store.getState().panelTab === 'media'
     && document.querySelector('[role=tablist][aria-label=Media] [aria-selected=true]')?.textContent === 'Saved';"""
 OPEN_SAVED = """window.__nuzky.store.setState({panelTab: 'media'}); return true;"""
 SAVED_TAB = "[role=tablist][aria-label=Media] [data-tab=\"saved\"]"
+# Two clicks on Save before the first save answers, as a double click gives.
+DOUBLE_SAVE = """const b = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save');
+if (!b) return false; b.click(); b.click(); return true;"""
 UNDO_TOAST = """const t = window.__nuzky.store.getState().toasts.find((t) => t.text === arguments[0]);
 if (!t?.action) return false; t.action.run(); return true;"""
 
@@ -76,10 +79,13 @@ def saved_elements_flow(r):
     tab = wait(lambda: r.s.run(SAVED_SHOWN), 3)
     suggested = r.s.run("return document.querySelector('input[aria-label=\"Element name\"]')?.value ?? null")
     r.check("the Media tab opens on Saved with the name field, named after the clips", tab and suggested == '2 clips', suggested)
-    name_it(r, 'Hook and arrow')
+    wait(lambda: r.s.run(FILL, 'Hook and arrow'), 5)
+    r.check('a double click on Save', r.s.run(DOUBLE_SAVE))
     saved = wait(lambda: (s := stored(r)) and s, 10) or []
+    time.sleep(1.5)
+    saved = stored(r)
     element = saved[0] if saved else {}
-    r.check('the element is kept beside the projects with both clips and only the arrow file',
+    r.check('the element is kept once beside the projects, with both clips and only the arrow file',
             len(saved) == 1 and element['name'] == 'Hook and arrow' and len(element['clips']) == 2
             and [a['path'] for a in element['assets']] == [arrow['path']], saved)
     picture = r.work / f"data/nuzky/elements/{element.get('id')}.png"

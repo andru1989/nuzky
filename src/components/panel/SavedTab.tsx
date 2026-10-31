@@ -86,7 +86,7 @@ export function SavedTab() {
                   maxLength={60}
                   initial={element.name}
                   error={renaming.error}
-                  onSave={(name) => void rename(element.id, name)}
+                  onSave={(name) => rename(element.id, name)}
                   onCancel={() => {
                     setRenaming(null);
                     setFocus(element.id);

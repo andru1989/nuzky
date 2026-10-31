@@ -41,7 +41,7 @@ fn sidecar(path: &Path, suffix: &str) -> PathBuf {
 
 /// A spawned child shares this process's open files, download locks included, until it execs.
 #[cfg(test)]
-static CHILD_SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) static CHILD_SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);

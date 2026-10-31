@@ -293,7 +293,10 @@ function MyStyles({ look, mine, tile }: { look: CaptionLook; mine: ReturnType<ty
   );
 }
 
-/** A name typed in place, for a saved style or element: `Enter` saves, `Esc` cancels. */
+/**
+ * A name typed in place, for a saved style or element: `Enter` saves, `Esc` cancels. While a save runs, another
+ * `Enter` or click on Save does nothing, so a double click saves once.
+ */
 export function NameField({
   initial,
   error,
@@ -304,18 +307,31 @@ export function NameField({
 }: {
   initial: string;
   error?: string;
-  onSave: (name: string) => void;
+  onSave: (name: string) => unknown;
   onCancel: () => void;
   label?: string;
   maxLength?: number;
 }) {
   const [name, setName] = useState(initial);
+  const [saving, setSaving] = useState(false);
+  const busy = useRef(false);
   const ref = useRef<HTMLInputElement>(null);
   useEffect(() => ref.current?.select(), []);
   useEffect(() => {
     if (error) ref.current?.focus();
   }, [error]);
-  const submit = () => (name.trim() ? onSave(name.trim()) : onCancel());
+  const submit = async () => {
+    if (busy.current) return;
+    if (!name.trim()) return onCancel();
+    busy.current = true;
+    setSaving(true);
+    try {
+      await onSave(name.trim());
+    } finally {
+      busy.current = false;
+      setSaving(false);
+    }
+  };
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center gap-1.5">
@@ -328,12 +344,14 @@ export function NameField({
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
             e.stopPropagation();
-            if (e.key === "Enter") submit();
+            if (e.key === "Enter") void submit();
             else if (e.key === "Escape") onCancel();
           }}
           className={`h-8 min-w-0 flex-1 rounded-lg border bg-white/[.055] px-2.5 text-[13px] text-fg outline-none ${error ? "border-danger" : "border-white/[.08] focus:border-accent"}`}
         />
-        <Button onClick={submit}>Save</Button>
+        <Button onClick={() => void submit()} disabled={saving} disabledReason="Saving…">
+          Save
+        </Button>
         <Button variant="ghost" onClick={onCancel}>
           Cancel
         </Button>

@@ -54,15 +54,22 @@ export function startSavingSelection() {
   useEditor.setState({ panelTab: "media" });
 }
 
-/** Saves the clips waiting for a name; returns why it failed, or null. */
+let saving = false;
+
+/** Saves the clips waiting for a name once, however often it is asked meanwhile; returns why it failed, or null. */
 export async function saveNamed(name: string): Promise<string | null> {
   const naming = useElements.getState().naming;
-  if (!naming) return null;
-  const error = await change(() => api.saveElement(name, naming.clipIds));
-  if (error) return error;
-  useElements.setState({ naming: null });
-  useEditor.getState().toast({ kind: "info", text: `Saved “${name.trim()}”` });
-  return null;
+  if (!naming || saving) return null;
+  saving = true;
+  try {
+    const error = await change(() => api.saveElement(name, naming.clipIds));
+    if (error) return error;
+    useElements.setState({ naming: null });
+    useEditor.getState().toast({ kind: "info", text: `Saved “${name.trim()}”` });
+    return null;
+  } finally {
+    saving = false;
+  }
 }
 
 export const cancelNaming = () => useElements.setState({ naming: null });
